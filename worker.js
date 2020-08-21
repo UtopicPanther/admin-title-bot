@@ -2,7 +2,8 @@ addEventListener('fetch', event => {
   event.respondWith(handleRequest(event.request))
 })
 
-const botUserId = ""; // your Bot user id
+const token = ""; // PUT YOUR TOKEN HERE
+const botUserId = token.substring(0, token.indexOf(":"));
 
 const permList = [
   "can_change_info",
@@ -16,7 +17,7 @@ async function tg(body, method) {
   if (method == null)
     method = "sendMessage";
 
-  const url = 'https://api.telegram.org/bot<YOUR_BOT_TOKEN>/' + method;
+  const url = 'https://api.telegram.org/bot' + token + '/' + method;
 
   const headers = {
     'Content-type': 'application/json'
@@ -64,7 +65,14 @@ async function handleRequest(request) {
       });
     } else if (msg.text.startsWith('/setCustomTitle')) {
       const i = msg.text.indexOf(" ");
-      if (i > 0) {
+      if (i <= 0) {
+        await tg({
+          chat_id: msg.chat.id,
+          text: "syntax error.\nusage: <code>/setCustomTitle NEW_TITLE</code>",
+          parse_mode: "html",
+          reply_to_message_id: msg.message_id
+        });
+      } else {
         const title = msg.text.substring(i + 1);
 
         const me = await tg({
