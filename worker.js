@@ -106,7 +106,7 @@ async function handleRequest(request) {
           custom_title: title
         }, "setChatAdministratorCustomTitle");
 
-        if (!rr.ok) await die(msg.chat.id, "Can not set custom title: " + r.description);
+        if (!rr.ok) await die(msg.chat.id, "Can not set custom title: " + rr.description + "\n\nIf you see that it says you are not an administrator, please wait a moment and reset.");
 
         await tg({
           chat_id: msg.chat.id,
