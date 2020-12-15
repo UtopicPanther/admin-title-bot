@@ -2,7 +2,7 @@ addEventListener('fetch', event => {
   event.respondWith(handleRequest(event.request))
 })
 
-const token = ""; // PUT YOUR TOKEN HERE
+const token = "1331167233:AAF9XzsBwcHlN_H761Poo-mlXNNzxnvq7GI"; // PUT YOUR TOKEN HERE
 const botUserId = token.substring(0, token.indexOf(":"));
 
 const permList = [
@@ -12,6 +12,10 @@ const permList = [
   "can_restrict_members",
   "can_pin_messages"
 ];
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 async function tg(body, method) {
   if (method == null)
@@ -45,7 +49,35 @@ async function handleRequest(request) {
 
     const msg = body.message;
 
-    if (msg.text.startsWith("/revokeAdmin")) {
+    if (msg.text.startsWith("/kbd")) {
+        await tg({
+        chat_id: msg.chat.id,
+        text: "Keyboard",
+        parse_mode: "html",
+        reply_markup: {
+            one_time_keyboard: true,
+            keyboard: [
+                [
+                    {
+                        text:"aaa"
+                    },
+                    {
+                        text:"bbb"
+                    }
+                ]
+            ]
+        }
+      });
+    } else if (msg.text.startsWith("/remove_kbd")) {
+        await tg({
+        chat_id: msg.chat.id,
+        text: "Remove",
+        parse_mode: "html",
+        reply_markup: {
+            remove_keyboard: true
+        }
+      });
+    } else if (msg.text.startsWith("/revokeAdmin")) {
 
       const np = {
         chat_id: msg.chat.id,
@@ -100,6 +132,8 @@ async function handleRequest(request) {
 
         if (!r.ok) await die(msg.chat.id, "Can not promote member: " + r.description);
 
+        await sleep(2000);
+
         const rr = await tg({
           chat_id: msg.chat.id,
           user_id: msg["from"].id,
@@ -110,7 +144,7 @@ async function handleRequest(request) {
 
         await tg({
           chat_id: msg.chat.id,
-          text: "OK, set title to <code> " + title + "</code>\n\nGranted permissions:\n<code>" + permUF + "</code>",
+          text: "OK, set your title to <code> " + title + "</code>\n\nGranted permissions:\n<code>" + permUF + "</code>",
           parse_mode: "html",
           reply_to_message_id: msg.message_id
         });
