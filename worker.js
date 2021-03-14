@@ -296,9 +296,8 @@ function GroupCreatorCommand(name, func, allowAll, userConfigName, groupConfigNa
         return await this._func(chatid, userid, msg, args, targetUserid, configName);
     }, true);
 }
-GroupCreatorCommand.prototype = Object.create(GroupCreatorCommand.prototype);
+GroupCreatorCommand.prototype = Object.create(Command.prototype);
 GroupCreatorCommand.prototype.constructor = GroupCreatorCommand;
-GroupCreatorCommand.prototype.realize = Command.prototype.realize;
 
 new GroupCreatorCommand('/setCTByGroupCreator', async function(chatid, userid, msg, args, targetUserid, configName) {
     const list = await setCustomTitle(chatid, targetUserid, args[2]);
