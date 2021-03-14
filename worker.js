@@ -100,7 +100,7 @@ async function assertGroupCreator(chatid, userid) {
 }
 
 async function setCustomTitle(chatid, userid, title) {
-    perm = await getUserConfig(chatid, userid, "cap");
+    const perm = await getUserConfig(chatid, userid, "cap");
     if (perm == null) {
         perm = await getUserConfig(chatid, null, ":group_cap");
         if (perm == null) {
@@ -232,7 +232,7 @@ new Command('/setCustomTitle', async function(chatid, userid, msg, args) {
     const list = await setCustomTitle(chatid, userid, args[1]);
 
     let ufPerm = "";
-    perm.forEach(p => { ufPerm += p + "\n"; });
+    list.forEach(p => { ufPerm += p + "\n"; });
 
     await tg({
         chat_id: chatid,
@@ -301,20 +301,20 @@ GroupCreatorCommand.prototype.constructor = GroupCreatorCommand;
 GroupCreatorCommand.prototype.realize = Command.prototype.realize;
 
 new GroupCreatorCommand('/setCTByGroupCreator', async function(chatid, userid, msg, args, targetUserid, configName) {
-    const list = setCustomTitle(chatid, userid, args[1]);
+    const list = await setCustomTitle(chatid, targetUserid, args[2]);
 
     let ufPerm = "";
-    perm.forEach(p => { ufPerm += p + "\n"; });
+    list.forEach(p => { ufPerm += p + "\n"; });
 
     await tg({
         chat_id: chatid,
-        text: "OK, set user's title to <code> " + title + "</code>\n\nGranted permissions:\n<code>" + ufPerm + "</code>",
+        text: "OK, set user's title to <code> " + args[2] + "</code>\n\nGranted permissions:\n<code>" + ufPerm + "</code>",
         parse_mode: "html"
     });
 }, false, null, null, 3, "NEW_TITLE").realize();
 
 new GroupCreatorCommand('/grantCT', async function(chatid, userid, msg, args, targetUserid, configName) {
-    perm = args[2].split(",");
+    const perm = args[2].split(",");
     await setUserConfig(chatid, targetUserid, configName, perm);
 
     await tg({
