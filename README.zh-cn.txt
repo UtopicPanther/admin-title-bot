@@ -3,101 +3,81 @@ Telegram 上的管理员头衔机器人
 
 Telegram 的群组管理员不能设置自己的头衔，本 Bot 可以帮助克服此缺陷。
 
-Admin Title Bot 共有两种工作模式
-
-mode1: 群组中的任何用户都可以设置自己的头衔（默认）
-mode2: 只有被创建者授权的用户才可以设置自己的头衔
-
-将你的群组 ID 添加到 worker.js 的 mode2_group_ids 集合中，
-即可为你的群组启用 mode2
-
 将 worker.js 部署到 Cloudflare Workers，联系 Telegram Botfather 创建 bot，
+创建一个叫 CT_NAMESPACE 的 Workers KV，
+设置环境变量 BOT_TOKEN 为你的 Bot Token，例如 "100000000:ABBBB-m123789aaa"，
 并调用 setWebhook API 激活 Bot。
-如果你要使用 mode2，你需要创建一个叫 CT_NAMESPACE 的 Workers KV。
 
 将你的 Bot 添加到群组，授予 Bot 权限。“添加新管理员”（can_promote_members）
 权限是必须的。
 
 
-权限
-====
+群主命令
+========
 
-mode1
------
+下面的命令由群主使用。
 
-如果要在 mode1 下使用，除了需要添加 “添加新管理员”（can_promote_members）
-权限，你还必须添加至少一个权限。
+参数中的 [user] 表示对目标用户进行指定，可以设定为以下的 3 种:
 
-当用户通过 mode1 设置头衔时，他会自动成为管理员，并且获得除
-“添加新管理员”（can_promote_members）以外的 Bot 持有的全部权限。
+- 通过回复一条消息，将指定消息发出用户，同时**必须**忽略此参数，
+  即不能再指定此参数，如 [回复某人]/grantCT cap_list
 
-mode2
------
+- 通过设定用户 ID，如 /grantCT 123456 cap_list
 
-mode2 下将可以配置每个用户能获得的权限。要使设置的权限名称生效，你还需要给
-Bot 相应的权限
+- 除了 /setCTByGroupCreator，也可以指定为 all，表示对全体成员设定，例如
+  使用 /grantCT all cap_list 后，全体成员都可以通过此 bot 获得设定的权限并
+  设定头衔。注意：全体成员设定优先级低于指定用户的设定。即 all 设定可以被
+  针对某一的设定所覆盖。
 
+/grantCT [user] <cap list>
+--------------------------
 
-群主命令（仅限 mode2）
-=====================
+授权某个用户/全体成员，以使其可以使用 Admin Title Bot 成为管理员并设置头衔
 
-下面的命令由群主使用，并只在 mode2 群组中生效。
-
-/grantCT <configuration>
-------------------------
-
-对目标用户的一则消息进行回复，以指定成员。
-
-授权某个用户，以使其可以使用 Admin Title Bot 成为管理员并设置头衔
-
-configuration 格式
-
-	cap=<权限设置，每个权限名称之间使用半角逗号「,」隔开>
+configuration 格式为 <权限设置，每个权限名称之间使用半角逗号「,」隔开>，
+不得包含额外的空格。
 
 例如
 
-	cap=can_change_info,can_delete_messages,can_invite_users,can_restrict_members
+	can_change_info,can_delete_messages,can_invite_users,can_restrict_members
 
 	这表示此用户可以修改群组信息、删除消息、邀请用户，限制用户
 	不能添加新的管理员，不能置顶消息
 
 Telegram 的权限名称如下表所示
 
-+-----------------------+-----------------------------------------------+
-| 权限名称              | 描述                                          |
-+-----------------------+-----------------------------------------------+
-| can_change_info       | 允许修改群组信息                              |
-| can_delete_messages   | 允许删除其他成员的消息                        |
-| can_invite_users      | 允许邀请新用户加入群组                        |
-| can_restrict_members  | 允许对群组成员进行限制                        |
-| can_pin_messages      | 允许置顶消息                                  |
-| can_promote_members   | 可以创建新的管理员                            |
-+-----------------------+-----------------------------------------------+
++------------------------+----------------------------------------------+
+| 权限名称               | 描述                                         |
++------------------------+----------------------------------------------+
+| can_change_info        | 允许修改群组信息                             |
+| can_delete_messages    | 允许删除其他成员的消息                       |
+| can_invite_users       | 允许邀请新用户加入群组                       |
+| can_restrict_members   | 允许对群组成员进行限制                       |
+| can_pin_messages       | 允许置顶消息                                 |
+| can_promote_members    | 可以创建新的管理员                           |
+| can_manage_voice_chats | 允许管理语音聊天                             |
++------------------------+----------------------------------------------+
 
-/getCT
-------
+/getCT [user]
+-------------
 
-对目标用户的一则消息进行回复，以指定成员。
+获得指定成员/全体成员的配置
 
-获得指定成员的配置
+/revokeCT [user]
+----------------
 
-/revokeCT
----------
-
-对目标用户的一则消息进行回复，以指定成员。
-
-撤销指定成员的配置。
+撤销指定成员/全体成员的配置。
 
 使用此命令不会撤销对应成员的管理员权限。你需要使用 Telegram 解除权限。
 此命令撤销用户使用 Admin Title Bot 的能力，使用此命令后对应成员将
 不能再设置头衔并成为管理员。
 
-/setCTByGroupCreator <title>
-----------------------------
+/setCTByGroupCreator [user] <title>
+-----------------------------------
 
-对目标用户的一则消息进行回复，以指定成员。
+注意：不可指定 all
 
-将目标用户的头衔设置为 <title>，并使其成为管理员
+将目标用户的头衔设置为 <title>，并使其成为管理员。
 
 
 成员命令
@@ -108,7 +88,10 @@ Telegram 的权限名称如下表所示
 
 设置自己的头衔为 <title>，并成为管理员。
 
-若群组已启用 mode2，未经授权的用户不能使用此命令。
+若群主已为当前用户 /grantCT 相关权限后，则按照此设置提升用户的权限。
+若当前用户没有设置权限（如没有 /grantCT 或已 /revokeCT），则检查是否为全体
+用户设置权限（/grantCT all），如果存在，则按照此设置提升用户的权限。
+若也没有设置（如没有 /grantCT all 或已 /revokeCT all），设置头衔将失败。
 
 /revokeAdmin
 ------------
@@ -139,9 +122,11 @@ supergroup and channel chats only
 	   Bot 授予了 D，E 作为管理员
 	   D 授予了 F 作为管理员
 
-	   现在，Bot 可以修改 D, E, F 和其他非管理员用户的管理员头衔
-	   Bot 不能修改 A, B, C 的管理员头衔，因为它们不是 Bot 的“后代”
-	   Bot 不能修改 X 的管理员头衔，因为 X 是 Bot 的“先辈”
+	   现在，Bot 可以修改 D, E, F 和其他非管理员用户的管理员头衔。
+	   Bot 不能修改 A, B, C 的管理员头衔，因为它们不和 Bot 在同一个
+	   链上。
+	   Bot 不能修改 X 的管理员头衔，虽然它们在同一个链上，但是 X 是
+	   Bot 的 “先辈” 而不是 “后代”。
 
 	   最佳实践是，群主只授权 Bot，其他管理员成员均通过 Bot 成为管理员
 	   （/setCustomTitle 或者 /setCTByGroupCreator）
@@ -149,8 +134,12 @@ supergroup and channel chats only
 
 错误提示：Can not promote member: Bad Request: USER_NOT_MUTUAL_CONTACT
 
-	对应消息的发送者已经不再在群组中了。
+	指定的用户已经不再在群组中了。
 
-为什么缺少管理语音消息的权限。
+错误提示：Can not set custom title: Forbidden: RIGHT_FORBIDDEN
 
-	因为当前的 Telegram Bot API 不支持它。它在未来可能得到支持。
+	通常是类似这种情况：群主授予 Bot 作为管理员，A 通过 Bot 得到管理员
+	和头衔，但是群主又自己编辑了 A 的权限。A 此时自己修改头衔时，在
+	有的时候（可能是修改了 Bot 不具备的权限或未在 Bot 处 /grantCT 设置
+	的权限）就可能出现这个错误。解决方法很简单。首先使用 /revokeAdmin
+	撤销自己的管理员权限，再重新设置即可。

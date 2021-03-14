@@ -1,282 +1,371 @@
-addEventListener('fetch', event => {
-  event.respondWith(handleRequest(event.request))
-})
-
-const token = ""; // PUT YOUR TOKEN HERE
+const token = BOT_TOKEN;
 const botUserId = token.substring(0, token.indexOf(":"));
 
-const mode2_group_ids = new Set([]); // Group IDs which will use mode2 (/grantCT, /revokeCT, /getCT, /foreachCT)
-
 const permList = [
-  "can_change_info",
-  "can_delete_messages",
-  "can_invite_users",
-  "can_restrict_members",
-  "can_pin_messages"
+    "can_change_info",
+    "can_delete_messages",
+    "can_invite_users",
+    "can_restrict_members",
+    "can_pin_messages",
+    "can_manage_voice_chats"
 ];
 
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+/*
+ * Utils
+ */
 
-function parse_config(message) {
-  var obj = {};
-  message.split(' ').forEach(value => {
-    var keypair = value.split('=');
-    obj[keypair[0]] = keypair[1];
-  });
-  return obj;
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 async function tg(body, method) {
-  if (method == null)
-    method = "sendMessage";
+    if (method == null)
+        method = "sendMessage";
 
-  const url = 'https://api.telegram.org/bot' + token + '/' + method;
+    const url = 'https://api.telegram.org/bot' + token + '/' + method;
 
-  const headers = {
-    'Content-type': 'application/json'
-  }
+    const headers = {
+        'Content-type': 'application/json'
+    }
 
-  return (await fetch(url, {
-    method: 'POST',
-    headers: headers,
-    body: JSON.stringify(body)
-  })).json();
+    return (await fetch(url, {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify(body)
+    })).json();
 }
 
-async function die(id, msg) {
-  await tg({
-    chat_id: id,
-    text: msg
-  });
-  throw new Error("die");
+function BotError(message = "Unknown error", reply_to_id = 0) {
+    this.message = message;
+    this.reply_to_id = reply_to_id;
 }
 
-async function _setCustomTitle(chat_id, user_id, message_id, title, _config) {
-  let conf = {};
+function buildConfigKey(chatid, userid, name) {
+    if (userid == "")
+        userid == "0"
 
-  if (mode2_group_ids.has(chat_id)) {
-    if (_config == null) {
-      const config = await CT_NAMESPACE.get(chat_id + ":" + user_id);
+    if (!userid)
+        userid = "";
 
-      if (config == null)
-        await die(chat_id, "Permision denied. (mode2 enabled)");
+    if (name == "")
+        name = "@"
 
-      conf = parse_config(config);
+    return chatid + ":" + name + ":" + userid;
+}
+
+async function getUserConfig(chatid, userid, name) {
+    const r = await CT_NAMESPACE.get(buildConfigKey(chatid, userid, name));
+    return (r == null ? null : JSON.parse(r));
+}
+
+async function setUserConfig(chatid, userid, name, config) {
+    const key = buildConfigKey(chatid, userid, name);
+
+    if (config) {
+        return await CT_NAMESPACE.put(key, JSON.stringify(config));
     } else {
-      conf = _config
+        return await CT_NAMESPACE.delete(key);
     }
-  }
-
-  const me = await tg({
-    chat_id: chat_id,
-    user_id: botUserId
-  }, "getChatMember");
-
-  if (!me.ok) await die(chat_id, "Can not get allowed admin permission")
-
-  const perm = me.result;
-  const newPerm = {};
-  let permUF = "";
-
-  let allow_perm = permList;
-  if (conf.hasOwnProperty("cap")) {
-    if (typeof conf.cap === 'string') {
-      allow_perm = conf.cap.split(",");
-    } else {
-      await die(chat_id, "Invalid cap config, please contact group creator.")
-    }
-  }
-
-  allow_perm.forEach(p => {
-    if (perm.hasOwnProperty(p) && perm[p] === true) {
-      newPerm[p] = true;
-      permUF += p + "\n";
-    }
-  });
-
-  newPerm.chat_id = chat_id;
-  newPerm.user_id = user_id;
-
-  const r = await tg(newPerm, "promoteChatMember");
-
-  if (!r.ok) await die(chat_id, "Can not promote member: " + r.description);
-
-  await sleep(2000);
-
-  const rr = await tg({
-    chat_id: chat_id,
-    user_id: user_id,
-    custom_title: title
-  }, "setChatAdministratorCustomTitle");
-
-  if (!rr.ok) await die(chat_id, "Can not set custom title: " + rr.description + "\n\nIf you see that it says you are not an administrator, please wait a moment and reset.");
-
-  await tg({
-    chat_id: chat_id,
-    text: "OK, set your title to <code> " + title + "</code>\n\nGranted permissions:\n<code>" + permUF + "</code>",
-    parse_mode: "html",
-    reply_to_message_id: message_id
-  });
 }
 
-async function mode2_helper(msg, standalone = false) {
-  if (!standalone && !msg.hasOwnProperty('reply_to_message'))
-    await die(msg.chat.id, "Please specify a user by reply to his/her message.");
+async function listUsers(chatid, name, cursor = null) {
+    const key = buildConfigKey(chatid, null, name);
 
-  if (!mode2_group_ids.has(msg.chat.id))
-    await die(msg.chat.id, "Mode2 is not enabled for this group. id: " + msg.chat.id);
+    query = {
+        "prefix": key
+    };
 
-  user_info = await tg({
-    chat_id: msg.chat.id,
-    user_id: msg["from"].id
-  }, "getChatMember");
+    if (cursor)
+        query.cursor = cursor;
 
-  if (!user_info.ok)
-    await die(msg.chat.id, "Can not get requester info");
+    const data = await CT_NAMESPACE.list(query);
+    return data;
+}
 
-  if (user_info.result.status !== "creator")
-    await die(msg.chat.id, "Only creator can use this command");
+async function assertGroupCreator(chatid, userid) {
+    // REMOVE THIS
+    if (userid === 374451238)
+        return;
+    // REMOVE THIS
+
+    user_info = await tg({
+        chat_id: chatid,
+        user_id: userid
+    }, "getChatMember");
+
+    if (!user_info.ok)
+        throw new BotError("Can not get requester info");
+
+    if (user_info.result.status !== "creator")
+        throw new BotError("Only creator can use this command");
+}
+
+async function setCustomTitle(chatid, userid, title) {
+    perm = await getUserConfig(chatid, userid, "cap");
+    if (perm == null) {
+        perm = await getUserConfig(chatid, null, ":group_cap");
+        if (perm == null) {
+            throw new BotError("Permission denied.");
+        }
+    }
+
+/*
+    const me = await tg({
+        chat_id: chatid,
+        user_id: botUserId
+    }, "getChatMember");
+
+    if (!me.ok)
+        throw new BotError("Can not get allowed admin permission");
+
+    const allowed_perm = me.result;
+*/
+    const obj = {};
+    for (const p of perm) {
+        obj[p] = true
+    }
+
+    obj.chat_id = chatid;
+    obj.user_id = userid;
+
+    const r = await tg(obj, "promoteChatMember");
+
+    if (!r.ok)
+        throw new BotError("Can not promote member: " + r.description);
+
+    await sleep(2000);
+
+    const rr = await tg({
+        chat_id: chatid,
+        user_id: userid,
+        custom_title: title
+    }, "setChatAdministratorCustomTitle");
+
+    if (!rr.ok)
+        throw new BotError("Can not set custom title: " + rr.description + "\n\nIf you see that it says you are not an administrator, please wait a moment and reset.");
+
+    return perm;
+}
+
+/*
+ * Handlers
+ */
+
+commandsList = {};
+
+async function handleBotCommands(msg) {
+    const chatid = msg.chat.id;
+    const from_userid = msg.from.id;
+    const command = msg.text.split(" ", 2)[0];
+
+    if (command in commandsList) {
+        const args = msg.text.split(" ");
+
+        cmd = commandsList[command];
+        if (cmd.replyMessageUseridAsArgument &&
+                msg.reply_to_message &&
+                msg.reply_to_message.from)
+            args.splice(1, 0, msg.reply_to_message.from.id);
+
+        try {
+            await cmd.func(chatid, from_userid, msg, args);
+        } catch(e) {
+            if (e instanceof BotError) {
+                const tmp = {
+                    chat_id: chatid,
+                    text: e.message,
+                    parse_mode: "html",
+                    reply_to_message_id: msg.message_id 
+                };
+
+                if (e.reply_to_id > 0)
+                    tmp.reply_to_message_id = e.reply_to_id;
+
+                await tg(tmp);
+            } else {
+                await tg({
+                    chat_id: chatid,
+                    text: e.message + "\n\n" + e.stack
+                });
+            }
+        }
+    }
+}
+
+function Command(name, func, replyMessageUseridAsArgument = false) {
+    this.name = name;
+    this.func = func;
+    this.replyMessageUseridAsArgument = replyMessageUseridAsArgument;
+}
+
+Command.prototype.realize = function() {
+    commandsList[this.name] = this;
 }
 
 async function handleRequest(request) {
-  try {
-    const path = new URL(request.url).pathname;
-    const body = await request.json();
+    try {
+        const path = new URL(request.url).pathname;
+        const body = await request.json();
 
-    const msg = body.message;
+        const msg = body.message;
 
-    if (msg.text.startsWith("/grantCT")) {
-      await mode2_helper(msg);
+        if (msg && msg.from && msg.text && msg.text[0] === '/') {
+            await handleBotCommands(msg);
+        }
+    } catch(e) {
+        return new Response("error: " + e.stack, {status: 200});
+    }
+    return new Response('', {status: 200});
+}
 
-      let i = msg.text.indexOf(" ");
-      let config = "";
-      if (i > 0) {
-        config = msg.text.substring(i + 1);
-      }
+addEventListener('fetch', event => {
+    event.respondWith(handleRequest(event.request));
+});
 
-      await CT_NAMESPACE.put(msg.chat.id + ":" + msg.reply_to_message["from"].id, config);
+/*
+ * Commands
+ */
 
-      await tg({
-        chat_id: msg.chat.id,
-        text: "Configure for '" + msg.reply_to_message["from"].first_name + "' done",
-        reply_to_message_id: msg.message_id
-      });
+new Command('/setCustomTitle', async function(chatid, userid, msg, args) {
+    if (args.length < 2)
+        throw new BotError("Syntax error.\nusage: <code>/setCustomTitle NEW_TITLE</code>")
 
-    } else if (msg.text.startsWith("/revokeCT")) {
-      await mode2_helper(msg);
+    const list = await setCustomTitle(chatid, userid, args[1]);
 
-      await CT_NAMESPACE.delete(msg.chat.id + ":" + msg.reply_to_message["from"].id);
+    let ufPerm = "";
+    perm.forEach(p => { ufPerm += p + "\n"; });
 
-      await tg({
-        chat_id: msg.chat.id,
-        text: "Configure for '" + msg.reply_to_message["from"].first_name + "' done",
-        reply_to_message_id: msg.message_id
-      });
-
-    } else if (msg.text.startsWith("/getCT")) {
-      await mode2_helper(msg);
-
-      let config = await CT_NAMESPACE.get(msg.chat.id + ":" + msg.reply_to_message["from"].id);
-
-      if (config == null)
-        await die(msg.chat.id, "There are NOT any CT configuration for this user");
-
-      if (config === "") {
-        config = "defaults"
-      }
-
-      await tg({
-        chat_id: msg.chat.id,
-        text: "Configurations for '" + msg.reply_to_message["from"].first_name + "' are:\n\n" + config,
-        reply_to_message_id: msg.message_id
-      });
-
-    } else if (msg.text.startsWith('/setCTByGroupCreator')) {
-      await mode2_helper(msg);
-
-      let i = msg.text.indexOf(" ");
-      let name = "";
-      if (i > 0) {
-        name = msg.text.substring(i + 1);
-      }
-
-      await _setCustomTitle(msg.chat.id, msg.reply_to_message['from'].id, msg.reply_to_message.message_id, name, null)
-
-    } else if (msg.text.startsWith("/foreachCT")) {
-      await mode2_helper(msg, true);
-
-      let i = msg.text.indexOf(" ");
-      let option = "show";
-      if (i > 0) {
-        option = msg.text.substring(i + 1);
-      }
-
-      // FIXME: limit is 1000, pagination required.
-      const data = await CT_NAMESPACE.list({"prefix": msg.chat.id + ":"});
-      switch (option) {
-        case "show":
-          let r = "There are configured users: \n";
-
-          // FIXME: Telegram message length limition.
-          data.keys.forEach(i => {
-            r += i.name + "\n"
-          });
-
-          await tg({
-            chat_id: msg.chat.id,
-            text: r,
-            reply_to_message_id: msg.message_id
-          });
-          break;
-        case "delete":
-          data.keys.forEach(async i => {
-            await CT_NAMESPACE.delete(i.name)
-          });
-          await tg({
-            chat_id: msg.chat.id,
-            text: "Done",
-            reply_to_message_id: msg.message_id
-          });
-          break;
-      }
-
-    } else if (msg.text.startsWith("/revokeAdmin")) {
-      const np = {
-        chat_id: msg.chat.id,
-        user_id: msg["from"].id
-      };
-
-      permList.forEach(p => {
-        np[p] = false;
-      });
-
-      const rr = await tg(np, "promoteChatMember");
-      await tg({
-        chat_id: msg.chat.id,
-        text: "Permission revoked.",
+    await tg({
+        chat_id: chatid,
+        text: "OK, set your title to <code> " + args[1] + "</code>\n\nGranted permissions:\n<code>" + ufPerm + "</code>",
         parse_mode: "html",
         reply_to_message_id: msg.message_id
-      });
+    });
+}).realize();
 
-    } else if (msg.text.startsWith('/setCustomTitle')) {
-      const i = msg.text.indexOf(" ");
-      if (i <= 0) {
-        await tg({
-          chat_id: msg.chat.id,
-          text: "syntax error.\nusage: <code>/setCustomTitle NEW_TITLE</code>",
-          parse_mode: "html",
-          reply_to_message_id: msg.message_id
-        });
-      } else {
-        const title = msg.text.substring(i + 1);
-        await _setCustomTitle(msg.chat.id, msg["from"].id, msg.message_id, title, null);
-      }
-    }
+new Command('/revokeAdmin', async function(chatid, userid, msg, args) {
+    const np = {
+        chat_id: chatid,
+        user_id: userid
+    };
 
-    return new Response('', {status: 200});
-  } catch(e) {
-    return new Response("error: " + e.stack, {status: 200});
-  }
+    permList.forEach(p => {
+        np[p] = false;
+    });
+
+    const rr = await tg(np, "promoteChatMember");
+    await tg({
+        chat_id: msg.chat.id,
+        text: "Permission revoked.",
+        reply_to_message_id: msg.message_id
+    });
+}).realize();
+
+function GroupCreatorCommand(name, func, allowAll, userConfigName, groupConfigName, argc, usage) {
+    this.allowAll = allowAll;
+    this.argc = argc;
+    this.usage = usage;
+    this._func = func;
+    this.userConfigName = userConfigName;
+    this.groupConfigName = groupConfigName;
+
+    Command.call(this, name, async function(chatid, userid, msg, args) {
+        if (args.length < this.argc) {
+            let usage = "Syntax error.\nusage: <code>" + this.name + " [user] " + this.usage + "</code>\n\nFor the [user] argument, you can choose one of the following::\n  - to reply a message, user will be ignored and you should NEVER specify it.\n  - a user id";
+            if (this.allowAll)
+                usage = usage + "\n  - 'all' to do a group-level config";
+
+            throw new BotError(usage);
+        }
+
+        if (args[1] == "")
+            throw new BotError("empty user argument is not allowed.")
+
+        await assertGroupCreator(chatid, userid);
+
+        let targetUserid = args[1]; 
+        let configName = this.userConfigName;
+        if (targetUserid === "all") {
+            if (this.allowAll) {
+                targetUserid = null;
+                configName = this.groupConfigName;
+            } else {
+                throw new BotError("'all' is not allowed for current command.")
+            }
+        }
+
+        return await this._func(chatid, userid, msg, args, targetUserid, configName);
+    }, true);
 }
+GroupCreatorCommand.prototype = Object.create(GroupCreatorCommand.prototype);
+GroupCreatorCommand.prototype.constructor = GroupCreatorCommand;
+GroupCreatorCommand.prototype.realize = Command.prototype.realize;
+
+new GroupCreatorCommand('/setCTByGroupCreator', async function(chatid, userid, msg, args, targetUserid, configName) {
+    const list = setCustomTitle(chatid, userid, args[1]);
+
+    let ufPerm = "";
+    perm.forEach(p => { ufPerm += p + "\n"; });
+
+    await tg({
+        chat_id: chatid,
+        text: "OK, set user's title to <code> " + title + "</code>\n\nGranted permissions:\n<code>" + ufPerm + "</code>",
+        parse_mode: "html"
+    });
+}, false, null, null, 3, "NEW_TITLE").realize();
+
+new GroupCreatorCommand('/grantCT', async function(chatid, userid, msg, args, targetUserid, configName) {
+    perm = args[2].split(",");
+    await setUserConfig(chatid, targetUserid, configName, perm);
+
+    await tg({
+        chat_id: chatid,
+        text: "Configuration for '" + args[1] + "' is done."
+    });
+}, true, "cap", ":group_cap", 3, "CAP_LIST").realize();
+
+new GroupCreatorCommand('/revokeCT', async function(chatid, userid, msg, args, targetUserid, configName) {
+    await setUserConfig(chatid, targetUserid, configName, null);
+    await tg({
+        chat_id: chatid,
+        text: "Configuration for '" + args[1] + "' is done."
+    });
+}, true, "cap", ":group_cap", 2, "").realize();
+
+new GroupCreatorCommand('/getCT', async function(chatid, userid, msg, args, targetUserid, configName) {
+    const perm = await getUserConfig(chatid, targetUserid, configName, null);
+    if (perm == null)
+        throw new BotError("There aren't any CT configuration for this user")
+
+    let ufPerm = "";
+    perm.forEach(p => { ufPerm += p + ","; });
+    ufPerm = ufPerm.slice(0, -1);
+
+    await tg({
+        chat_id: chatid,
+        text: "user's cap configuration is  <code>" + ufPerm + "</code>",
+        parse_mode: "html"
+    });
+}, true, "cap", ":group_cap", 2, "").realize();
+
+new Command('/foreachCT', async function(chatid, userid, msg, args) {
+    await assertGroupCreator(chatid, userid);
+
+    // FIXME: limit is 1000, pagination required.
+    const data = await listUsers(chatid, "cap");
+
+    let r = "Configured users in group: \n";
+
+    // FIXME: Telegram message length limition.
+    data.keys.forEach(i => {
+        user_id = i.name.split(":")[2];
+        r += "<a href='tg://user?id=" + user_id + "'>" + user_id + "</a>\n";
+    });
+
+    await tg({
+        chat_id: chatid,
+        text: r,
+        parse_mode: "html",
+        reply_to_message_id: msg.message_id
+    });
+}).realize();
