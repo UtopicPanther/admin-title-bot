@@ -136,6 +136,12 @@ supergroup and channel chats only
 
 	指定的用户已经不再在群组中了。
 
+错误提示：Can not promote member: Forbidden: RIGHT_FORBIDDEN
+
+	通常是你没有给予 Bot 足够的权限。例如你没有给 Bot can_change_info
+	权限，但你通过 /grantCT 给某个/全部用户 can_change_info 权限。则
+	用户试图通过 /setCustomTitle 设置头衔时，就会产生此错误。
+
 错误提示：Can not set custom title: Forbidden: RIGHT_FORBIDDEN
 
 	通常是类似这种情况：群主授予 Bot 作为管理员，A 通过 Bot 得到管理员
