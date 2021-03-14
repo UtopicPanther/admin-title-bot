@@ -100,7 +100,7 @@ async function assertGroupCreator(chatid, userid) {
 }
 
 async function setCustomTitle(chatid, userid, title) {
-    const perm = await getUserConfig(chatid, userid, "cap");
+    let perm = await getUserConfig(chatid, userid, "cap");
     if (perm == null) {
         perm = await getUserConfig(chatid, null, ":group_cap");
         if (perm == null) {
@@ -193,7 +193,7 @@ async function handleBotCommands(msg) {
             } else {
                 await tg({
                     chat_id: chatid,
-                    text: e.message + "\n\n" + e.stack
+                    text: e.stack
                 });
             }
         }
