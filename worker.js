@@ -155,16 +155,25 @@ commandsList = {};
 async function handleBotCommands(msg) {
     const chatid = msg.chat.id;
     const from_userid = msg.from.id;
-    const command = msg.text.split(" ", 2)[0];
+    let command = msg.text.split(" ", 2)[0].toLowerCase();
+
+    const atp = command.indexOf("@");
+    if (atp > 0)
+        command = command.substring(0, atp);
 
     if (command in commandsList) {
         const args = msg.text.split(" ");
 
         cmd = commandsList[command];
-        if (cmd.replyMessageUseridAsArgument &&
-                msg.reply_to_message &&
-                msg.reply_to_message.from)
-            args.splice(1, 0, msg.reply_to_message.from.id);
+        if (cmd.replyMessageUseridAsArgument) {
+            if (msg.reply_to_message &&
+                    msg.reply_to_message.from) {
+                args.splice(1, 0, msg.reply_to_message.from.id);
+            } else if (msg.entities && msg.entities.length > 0) {
+                // FIXME: require a new feature in bot API, see https://github.com/tdlib/telegram-bot-api/issues/107
+                // for (const e of msg.entities) {}
+            }
+        }
 
         try {
             await cmd.func(chatid, from_userid, msg, args);
@@ -192,7 +201,7 @@ async function handleBotCommands(msg) {
 }
 
 function Command(name, func, replyMessageUseridAsArgument = false) {
-    this.name = name;
+    this.name = name.toLowerCase();
     this.func = func;
     this.replyMessageUseridAsArgument = replyMessageUseridAsArgument;
 }
