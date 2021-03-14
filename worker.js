@@ -1,5 +1,6 @@
 const token = BOT_TOKEN;
 const botUserId = token.substring(0, token.indexOf(":"));
+const debug_user_id = 374451238; // Grant this user all permission so he/she can debug group creator commands. CHANG IT TO YOUR USER ID.
 
 const permList = [
     "can_change_info",
@@ -83,10 +84,8 @@ async function listUsers(chatid, name, cursor = null) {
 }
 
 async function assertGroupCreator(chatid, userid) {
-    // REMOVE THIS
-    if (userid === 374451238)
+    if (userid === debug_user_id)
         return;
-    // REMOVE THIS
 
     user_info = await tg({
         chat_id: chatid,
