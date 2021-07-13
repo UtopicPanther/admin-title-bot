@@ -162,7 +162,7 @@ async function handleBotCommands(msg) {
         command = command.substring(0, atp);
 
     if (command in commandsList) {
-        const args = msg.text.split(" ");
+        const args = msg.text.split(" ").filter(i => (i != ""));
 
         cmd = commandsList[command];
         if (cmd.replyMessageUseridAsArgument) {
