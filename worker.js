@@ -78,7 +78,8 @@ async function listUsers(chatid, name, cursor = null) {
     const key = buildConfigKey(chatid, null, name);
 
     query = {
-        "prefix": key
+        "prefix": key,
+        "limit": 10
     };
 
     if (cursor)
@@ -346,7 +347,7 @@ function GroupCreatorCommand(name, func, allowAll, userConfigName, groupConfigNa
 
     Command.call(this, name, async function(chatid, userid, msg, args) {
         if (args.length < this.argc) {
-            let usage = "Syntax error.\nusage: <code>" + this.name + " [user] " + this.usage + "</code>\n\nFor the [user] argument, you can choose one of the following::\n  - to reply a message, user will be ignored and you should NEVER specify it.\n  - a user id";
+            let usage = "Syntax error.\nusage: <code>" + this.name + " [user] " + this.usage + "</code>\n\nFor the [user] argument, you can choose one of the following:\n  - to reply a message, user will be ignored and you should NEVER specify it.\n  - a user id";
             if (this.allowAll)
                 usage = usage + "\n  - 'all' to do a group-level config";
 
@@ -422,24 +423,61 @@ new GroupCreatorCommand('/getCT', async function(chatid, userid, msg, args, targ
     });
 }, true, "cap", ":group_cap", 2, "").realize();
 
-new Command('/foreachCT', async function(chatid, userid, msg, args) {
-    await assertGroupCreator(chatid, userid);
+async function buildListCTMessage(chatid, data, ck = null) {
+    let text = "Configured users: \n";
 
-    // FIXME: limit is 1000, pagination required.
-    const data = await listUsers(chatid, "cap");
-
-    let r = "Configured users in group: \n";
-
-    // FIXME: Telegram message length limition.
     data.keys.forEach(i => {
         user_id = i.name.split(":")[2];
-        r += "<a href='tg://user?id=" + user_id + "'>" + user_id + "</a>\n";
+        text += "<a href='tg://user?id=" + user_id + "'>" + user_id + "</a>\n";
     });
 
-    await tg({
+    const r = {
         chat_id: chatid,
-        text: r,
+        text: text,
         parse_mode: "html",
-        reply_to_message_id: msg.message_id
-    });
+    }
+
+    if (!data.list_complete) {
+        if (!ck)
+            ck = new Date().getTime();
+
+        await CT_CURSOR_NAMESPACE.put(chatid + ":" + ck, data.cursor, { expirationTtl: 1800 });
+
+        r.reply_markup = {
+            inline_keyboard: [
+                [ { text: "Next page", callback_data: "listCT:" + ck } ]
+            ]
+        };
+    }
+
+    return r;
+}
+
+new Command('/listCT', async function(chatid, userid, msg, args) {
+    await assertGroupCreator(chatid, userid);
+
+    const data = await listUsers(chatid, "cap");
+    const r = await buildListCTMessage(chatid, data);
+
+    await tg(r, null, true);
+}).realize();
+
+/*
+ * Callback queries
+ */
+
+new CallbackQuery('listCT', 1, async function(chatid, userid, query, args) {
+    await assertGroupCreator(chatid, userid);
+
+    const ck = args[1];
+    const cursor = await CT_CURSOR_NAMESPACE.get(chatid + ":" + ck);
+    if (!cursor)
+        throw new BotError("Session expired.")
+
+    const data = await listUsers(chatid, "cap", cursor);
+
+    const r = await buildListCTMessage(chatid, data, ck);
+    r.message_id = query.message.message_id;
+
+    await tg(r, "editMessageText", true);
 }).realize();
