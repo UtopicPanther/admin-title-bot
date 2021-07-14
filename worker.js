@@ -19,7 +19,12 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function tg(body, method) {
+function BotError(message = "Unknown error", reply_to_id = 0) {
+    this.message = message;
+    this.reply_to_id = reply_to_id;
+}
+
+async function tg(body, method, autothrow) {
     if (method == null)
         method = "sendMessage";
 
@@ -29,16 +34,16 @@ async function tg(body, method) {
         'Content-type': 'application/json'
     }
 
-    return (await fetch(url, {
+    const r = await (await fetch(url, {
         method: 'POST',
         headers: headers,
         body: JSON.stringify(body)
     })).json();
-}
 
-function BotError(message = "Unknown error", reply_to_id = 0) {
-    this.message = message;
-    this.reply_to_id = reply_to_id;
+	if (autothrow && !r.ok)
+		throw new BotError("Error: " + r.description);
+
+	return r;
 }
 
 function buildConfigKey(chatid, userid, name) {
