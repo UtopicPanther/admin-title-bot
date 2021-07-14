@@ -40,10 +40,10 @@ async function tg(body, method, autothrow) {
         body: JSON.stringify(body)
     })).json();
 
-	if (autothrow && !r.ok)
-		throw new BotError("Error: " + r.description);
+    if (autothrow && !r.ok)
+        throw new BotError("Error: " + r.description);
 
-	return r;
+    return r;
 }
 
 function buildConfigKey(chatid, userid, name) {
@@ -156,6 +156,7 @@ async function setCustomTitle(chatid, userid, title) {
  */
 
 commandsList = {};
+callbackQueryList = {};
 
 async function handleBotCommands(msg) {
     const chatid = msg.chat.id;
@@ -205,6 +206,52 @@ async function handleBotCommands(msg) {
     }
 }
 
+async function handleCallbackQuery(query) {
+    let answer = true;
+
+    if (query.message && query.data) {
+        const msg = query.message;
+        const chatid = msg.chat.id;
+        const from_userid = query.from.id;
+
+        let prefix = query.data.split(":", 2)[0].toLowerCase();
+        if (prefix in callbackQueryList) {
+            handler = callbackQueryList[prefix];
+            const args = query.data.split(":");
+
+            if (args.length === handler.argc) {
+                if (handler.noanswer)
+                    answer = false;
+
+                try {
+                    await handler.func(chatid, from_userid, query, args);
+                } catch(e) {
+                    if (e instanceof BotError) {
+                        answer = false;
+
+                        await tg({
+                            callback_query_id: query.id,
+                            text: e.message,
+                            show_alert: true
+                        }, "answerCallbackQuery");
+                    } else {
+                        await tg({
+                            chat_id: chatid,
+                            text: e.stack
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    if (answer) {
+        await tg({
+            callback_query_id: query.id
+        }, "answerCallbackQuery");
+    }
+}
+
 function Command(name, func, replyMessageUseridAsArgument = false) {
     this.name = name.toLowerCase();
     this.func = func;
@@ -213,6 +260,17 @@ function Command(name, func, replyMessageUseridAsArgument = false) {
 
 Command.prototype.realize = function() {
     commandsList[this.name] = this;
+}
+
+function CallbackQuery(name, argc, func, noanswer = false) {
+    this.name = name.toLowerCase();
+    this.argc = argc + 1;
+    this.func = func;
+    this.noanswer = noanswer;
+}
+
+CallbackQuery.prototype.realize = function() {
+    callbackQueryList[this.name] = this;
 }
 
 async function handleRequest(request) {
@@ -224,6 +282,10 @@ async function handleRequest(request) {
 
         if (msg && msg.from && msg.text && msg.text[0] === '/') {
             await handleBotCommands(msg);
+        } else if (body.callback_query) {
+            await handleCallbackQuery(body.callback_query)
+        } else if (body.chat_member && handleChatMemberUpdates) {
+            await handleChatMemberUpdates(body.chat_member)
         }
     } catch(e) {
         return new Response("error: " + e.stack, {status: 200});
