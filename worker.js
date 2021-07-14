@@ -8,6 +8,7 @@ const permList = [
     "can_invite_users",
     "can_restrict_members",
     "can_pin_messages",
+    "can_promote_members",
     "can_manage_voice_chats"
 ];
 
@@ -431,6 +432,42 @@ new GroupCreatorCommand('/getCT', async function(chatid, userid, msg, args, targ
     });
 }, true, "cap", ":group_cap", 2, "").realize();
 
+function buildEditCTReplyMarkup(perm, canRevoke, targetUser) {
+    const markup = [];
+    for (const p of permList) {
+        if (perm.has(p)) {
+            markup.push([ { text: "✅ " + p, callback_data: "editCT:x:" + p } ]);
+        } else {
+            markup.push([ { text: "❌ " + p, callback_data: "editCT:_:" + p } ]);
+        }
+    }
+
+    if (canRevoke)
+        markup.push([ { text: "Revoke CT", callback_data: "revokeCT:" + targetUser } ]);
+
+    markup.push([ { text: "Submit", callback_data: "editCT.submit:" + targetUser } ]);
+
+    return markup;
+}
+
+new GroupCreatorCommand('/editCT', async function(chatid, userid, msg, args, targetUserid, configName) {
+    let targetUser = targetUserid;
+    if (targetUser == null)
+        targetUser = "all"
+
+    const _perm = await getUserConfig(chatid, targetUserid, configName, null);
+    const perm = new Set(_perm);
+
+    await tg({
+        chat_id: chatid,
+        text: "Config for user: <code>" + targetUser + "</code>",
+        parse_mode: "html",
+        reply_markup: {
+            inline_keyboard: buildEditCTReplyMarkup(perm, (_perm != null), targetUser)
+        }
+    }, null, true);
+}, true, "cap", ":group_cap", 2, "").realize();
+
 async function buildListCTMessage(chatid, data, ck = null) {
     let text = "Configured users: \n";
 
@@ -488,4 +525,94 @@ new CallbackQuery('listCT', 1, async function(chatid, userid, query, args) {
     r.message_id = query.message.message_id;
 
     await tg(r, "editMessageText", true);
+}).realize();
+
+function parseEditCTInlineKeyboard(message, args) {
+    const perm = new Set();
+    let targetUser = null;
+
+    if (message.reply_markup && message.reply_markup.inline_keyboard) {
+        for (const e of message.reply_markup.inline_keyboard) {
+            const a = e[0].callback_data.split(":");
+            if (a.length === 3 && a[0] === "editCT") {
+                if (args && args[2] === a[2]) {
+                    if (args[1] === "_")
+                        perm.add(a[2]);
+                } else if (a[1] === "x") {
+                    perm.add(a[2]);
+                }
+            } else if (a.length == 2 && a[0] === "editCT.submit") {
+                targetUser = a[1];
+            }
+        }
+    }
+
+    return [perm, targetUser];
+}
+
+new CallbackQuery('revokeCT', 1, async function(chatid, userid, query, args) {
+    await assertGroupCreator(chatid, userid);
+
+    const message = query.message;
+    const [ perm, targetUser ] = parseEditCTInlineKeyboard(message, args);
+
+    if (targetUser === "all") {
+        await setUserConfig(chatid, null, ":group_cap", null);
+    } else {
+        await setUserConfig(chatid, targetUser, "cap", null);
+    }
+
+    await tg({
+        chat_id: chatid,
+        text: "Configuration for '" + targetUser + "' is done."
+    }, null, true);
+
+    await tg({
+        chat_id: chatid,
+        message_id: message.message_id,
+        reply_markup: { inline_keyboard: [] }
+    }, "editMessageReplyMarkup", true);
+}).realize();
+
+new CallbackQuery('editCT', 2, async function(chatid, userid, query, args) {
+    await assertGroupCreator(chatid, userid);
+
+    const message = query.message;
+    const [ perm, targetUser ] = parseEditCTInlineKeyboard(message, args);
+
+    await tg({
+        chat_id: chatid,
+        message_id: message.message_id,
+        reply_markup: {
+            inline_keyboard: buildEditCTReplyMarkup(perm, false, targetUser)
+        }
+    }, "editMessageReplyMarkup", true);
+}).realize();
+
+new CallbackQuery('editCT.submit', 1, async function(chatid, userid, query, args) {
+    await assertGroupCreator(chatid, userid);
+
+    const message = query.message;
+    const [ _perm, targetUser ] = parseEditCTInlineKeyboard(message);
+    const perm = [..._perm];
+
+    if (perm.length === 0)
+        throw new BotError("Perm List is empty. If you want to revoke CT configuration, please use /revokeCT or Revoke button.")
+
+    if (targetUser === "all") {
+        await setUserConfig(chatid, null, ":group_cap", perm);
+    } else {
+        await setUserConfig(chatid, targetUser, "cap", perm);
+    }
+
+    await tg({
+        chat_id: chatid,
+        text: "Configuration for '" + targetUser + "' is done."
+    }, null, true);
+
+    await tg({
+        chat_id: chatid,
+        message_id: message.message_id,
+        reply_markup: { inline_keyboard: [] }
+    }, "editMessageReplyMarkup", true);
 }).realize();
