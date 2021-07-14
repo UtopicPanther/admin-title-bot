@@ -169,9 +169,12 @@ async function handleBotCommands(msg) {
         command = command.substring(0, atp);
 
     if (command in commandsList) {
-        const args = msg.text.split(" ").filter(i => (i != ""));
-
         cmd = commandsList[command];
+
+        let args = msg.text;
+        if (!cmd.rawArgs)
+            args = msg.text.split(" ").filter(i => (i != ""));
+
         if (cmd.replyMessageUseridAsArgument) {
             if (msg.reply_to_message &&
                     msg.reply_to_message.from) {
@@ -253,10 +256,11 @@ async function handleCallbackQuery(query) {
     }
 }
 
-function Command(name, func, replyMessageUseridAsArgument = false) {
+function Command(name, func, replyMessageUseridAsArgument = false, rawArgs = false) {
     this.name = name.toLowerCase();
     this.func = func;
     this.replyMessageUseridAsArgument = replyMessageUseridAsArgument;
+    this.rawArgs = rawArgs;
 }
 
 Command.prototype.realize = function() {
@@ -303,21 +307,25 @@ addEventListener('fetch', event => {
  */
 
 new Command('/setCustomTitle', async function(chatid, userid, msg, args) {
-    if (args.length < 2)
+    spacePos = args.indexOf(" ");
+
+    if (spacePos < 0)
         throw new BotError("Syntax error.\nusage: <code>/setCustomTitle NEW_TITLE</code>")
 
-    const list = await setCustomTitle(chatid, userid, args[1]);
+    newTitle = args.substring(spacePos + 1).trim()
+
+    const list = await setCustomTitle(chatid, userid, newTitle);
 
     let ufPerm = "";
     list.forEach(p => { ufPerm += p + "\n"; });
 
     await tg({
         chat_id: chatid,
-        text: "OK, set your title to <code> " + args[1] + "</code>\n\nGranted permissions:\n<code>" + ufPerm + "</code>",
+        text: "OK, set your title to <code> " + newTitle + "</code>\n\nGranted permissions:\n<code>" + ufPerm + "</code>",
         parse_mode: "html",
         reply_to_message_id: msg.message_id
     });
-}).realize();
+}, false, true).realize();
 
 new Command('/revokeAdmin', async function(chatid, userid, msg, args) {
     const np = {
