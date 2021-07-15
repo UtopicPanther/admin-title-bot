@@ -23,7 +23,13 @@ function sleep(ms) {
 function BotError(message = "Unknown error", reply_to_id = 0) {
     this.message = message;
     this.reply_to_id = reply_to_id;
+
+    Error.captureStackTrace(this, BotError);
 }
+
+BotError.prototype = Object.create(Error.prototype);
+BotError.prototype.name = "BotError";
+BotError.prototype.constructor = BotError;
 
 async function tg(body, method, autothrow) {
     if (method == null)
@@ -255,6 +261,34 @@ async function handleCallbackQuery(query) {
             callback_query_id: query.id
         }, "answerCallbackQuery");
     }
+}
+
+async function handleChatMemberUpdates(member) {
+    function isMember(chatMember) {
+        return chatMember.status === "creator" ||
+                chatMember.status === "administrator" ||
+                chatMember.status === "member" ||
+                (chatMember.status === "restricted" && oldinfo.is_member);
+    }
+
+    const oldinfo = member.old_chat_member;
+    const newinfo = member.new_chat_member;
+
+    const chatid = member.chat.id;
+
+    const wasMember = isMember(oldinfo);
+    const curIsMember = isMember(newinfo)
+
+    const userid = newinfo.user.id;
+
+    if (!wasMember && curIsMember && handleChatMemberAdded) {
+        await handleChatMemberAdded(chatid, userid, newinfo);
+    } else if (wasMember && curIsMember) {
+        if (oldinfo.status === "administrator" && newinfo.status === "member" && handleChatMemberDismissed) {
+            await handleChatMemberDismissed(chatid, userid, newinfo);
+        }
+    }
+
 }
 
 function Command(name, func, replyMessageUseridAsArgument = false, rawArgs = false) {
@@ -554,7 +588,7 @@ new CallbackQuery('revokeCT', 1, async function(chatid, userid, query, args) {
     await assertGroupCreator(chatid, userid);
 
     const message = query.message;
-    const [ perm, targetUser ] = parseEditCTInlineKeyboard(message, args);
+    const targetUser = args[1];
 
     if (targetUser === "all") {
         await setUserConfig(chatid, null, ":group_cap", null);
@@ -616,3 +650,36 @@ new CallbackQuery('editCT.submit', 1, async function(chatid, userid, query, args
         reply_markup: { inline_keyboard: [] }
     }, "editMessageReplyMarkup", true);
 }).realize();
+
+new CallbackQuery('deleteMessage.admin', 0, async function(chatid, userid, query, args) {
+    await assertGroupCreator(chatid, userid);
+
+    const message = query.message;
+
+    await tg({
+        chat_id: chatid,
+        message_id: message.message_id
+    }, "deleteMessage", true);
+}).realize();
+/*
+ * Chat member handlers
+ */
+
+async function handleChatMemberDismissed(chatid, userid, chatMember) {
+    const perm = await getUserConfig(chatid, userid, "cap", null);
+    const userFriendlyName = chatMember.user.first_name;
+
+    if (perm) {
+        await tg({
+            chat_id: chatid,
+            text: "User <code>" + userid + " (" + userFriendlyName + ")</code> has been dismissed from administrators, revoke his/her/its CT configuration too?",
+            parse_mode: "html",
+            reply_markup: {
+                inline_keyboard: [
+                    [ { text: "Revoke CT", callback_data: "revokeCT:" + userid } ],
+                    [ { text: "Retain CT", callback_data: "deleteMessage.admin" } ]
+                ]
+            }
+        }, null, true);
+    }
+}
