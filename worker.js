@@ -53,15 +53,21 @@ async function tg(body, method, autothrow) {
     return r;
 }
 
-function buildConfigKey(chatid, userid, name) {
-    if (userid == "")
-        userid == "0"
+const group_level_configs_map = new Map();
+group_level_configs_map.set("all", ":group_cap")
+group_level_configs_map.set("bot", ":bot_cap")
 
+function buildConfigKey(chatid, userid, name) {
     if (!userid)
         userid = "";
 
     if (name == "")
         name = "@"
+
+    if (group_level_configs_map.has(userid)) {
+        name = group_level_configs_map.get(userid);
+        userid = "";
+    }
 
     return chatid + ":" + name + ":" + userid;
 }
@@ -380,19 +386,18 @@ new Command('/revokeAdmin', async function(chatid, userid, msg, args) {
     });
 }).realize();
 
-function GroupCreatorCommand(name, func, allowAll, userConfigName, groupConfigName, argc, usage) {
-    this.allowAll = allowAll;
+function GroupCreatorCommand(name, func, allowGLC, argc, usage) {
+    this.allowGLC = allowGLC;
     this.argc = argc;
     this.usage = usage;
     this._func = func;
-    this.userConfigName = userConfigName;
-    this.groupConfigName = groupConfigName;
 
     Command.call(this, name, async function(chatid, userid, msg, args) {
         if (args.length < this.argc) {
-            let usage = "Syntax error.\nusage: <code>" + this.name + " [user] " + this.usage + "</code>\n\nFor the [user] argument, you can choose one of the following:\n  - to reply a message, user will be ignored and you should NEVER specify it.\n  - a user id";
-            if (this.allowAll)
-                usage = usage + "\n  - 'all' to do a group-level config";
+            let usage = "Syntax error.\nusage: <code>" + this.name + " [user] " + this.usage + "</code>\n\nFor the [user] argument, you can choose one of the following:\n  - to reply a message, user will be ignored and you should NEVER specify it.\n  - a user id. (for example, " + debug_user_id + ")";
+            if (this.allowGLC) {
+                usage = usage + "\n  - 'all' to do a group-level fallback config.\n  - 'bot' to do a group-level bot bounding config.";
+            }
 
             throw new BotError(usage);
         }
@@ -403,23 +408,16 @@ function GroupCreatorCommand(name, func, allowAll, userConfigName, groupConfigNa
         await assertGroupCreator(chatid, userid);
 
         let targetUserid = args[1]; 
-        let configName = this.userConfigName;
-        if (targetUserid === "all") {
-            if (this.allowAll) {
-                targetUserid = null;
-                configName = this.groupConfigName;
-            } else {
-                throw new BotError("'all' is not allowed for current command.")
-            }
-        }
+        if (!this.allowGLC && group_level_configs_map.has(targetUserid))
+            throw new BotError("group-level configs is not allowed for current command.")
 
-        return await this._func(chatid, userid, msg, args, targetUserid, configName);
+        return await this._func(chatid, userid, msg, args, targetUserid);
     }, true);
 }
 GroupCreatorCommand.prototype = Object.create(Command.prototype);
 GroupCreatorCommand.prototype.constructor = GroupCreatorCommand;
 
-new GroupCreatorCommand('/setCTByGroupCreator', async function(chatid, userid, msg, args, targetUserid, configName) {
+new GroupCreatorCommand('/setCTByGroupCreator', async function(chatid, userid, msg, args, targetUserid) {
     const list = await setCustomTitle(chatid, targetUserid, args[2]);
 
     let ufPerm = "";
@@ -430,28 +428,28 @@ new GroupCreatorCommand('/setCTByGroupCreator', async function(chatid, userid, m
         text: "OK, set user's title to <code> " + args[2] + "</code>\n\nGranted permissions:\n<code>" + ufPerm + "</code>",
         parse_mode: "html"
     });
-}, false, null, null, 3, "NEW_TITLE").realize();
+}, false, 3, "NEW_TITLE").realize();
 
-new GroupCreatorCommand('/grantCT', async function(chatid, userid, msg, args, targetUserid, configName) {
+new GroupCreatorCommand('/grantCT', async function(chatid, userid, msg, args, targetUserid) {
     const perm = args[2].split(",");
-    await setUserConfig(chatid, targetUserid, configName, perm);
+    await setUserConfig(chatid, targetUserid, "cap", perm);
 
     await tg({
         chat_id: chatid,
         text: "Configuration for '" + args[1] + "' is done."
     });
-}, true, "cap", ":group_cap", 3, "CAP_LIST").realize();
+}, true, 3, "CAP_LIST").realize();
 
-new GroupCreatorCommand('/revokeCT', async function(chatid, userid, msg, args, targetUserid, configName) {
-    await setUserConfig(chatid, targetUserid, configName, null);
+new GroupCreatorCommand('/revokeCT', async function(chatid, userid, msg, args, targetUserid) {
+    await setUserConfig(chatid, targetUserid, "cap", null);
     await tg({
         chat_id: chatid,
         text: "Configuration for '" + args[1] + "' is done."
     });
-}, true, "cap", ":group_cap", 2, "").realize();
+}, true, 2, "").realize();
 
-new GroupCreatorCommand('/getCT', async function(chatid, userid, msg, args, targetUserid, configName) {
-    const perm = await getUserConfig(chatid, targetUserid, configName, null);
+new GroupCreatorCommand('/getCT', async function(chatid, userid, msg, args, targetUserid) {
+    const perm = await getUserConfig(chatid, targetUserid, "cap", null);
     if (perm == null)
         throw new BotError("There aren't any CT configuration for this user")
 
@@ -464,7 +462,7 @@ new GroupCreatorCommand('/getCT', async function(chatid, userid, msg, args, targ
         text: "user's cap configuration is  <code>" + ufPerm + "</code>",
         parse_mode: "html"
     });
-}, true, "cap", ":group_cap", 2, "").realize();
+}, true, 2, "").realize();
 
 function buildEditCTReplyMarkup(perm, canRevoke, targetUser) {
     const markup = [];
@@ -484,12 +482,12 @@ function buildEditCTReplyMarkup(perm, canRevoke, targetUser) {
     return markup;
 }
 
-new GroupCreatorCommand('/editCT', async function(chatid, userid, msg, args, targetUserid, configName) {
+new GroupCreatorCommand('/editCT', async function(chatid, userid, msg, args, targetUserid) {
     let targetUser = targetUserid;
     if (targetUser == null)
         targetUser = "all"
 
-    const _perm = await getUserConfig(chatid, targetUserid, configName, null);
+    const _perm = await getUserConfig(chatid, targetUserid, "cap", null);
     const perm = new Set(_perm);
 
     await tg({
@@ -500,7 +498,7 @@ new GroupCreatorCommand('/editCT', async function(chatid, userid, msg, args, tar
             inline_keyboard: buildEditCTReplyMarkup(perm, (_perm != null), targetUser)
         }
     }, null, true);
-}, true, "cap", ":group_cap", 2, "").realize();
+}, true, 2, "").realize();
 
 async function buildListCTMessage(chatid, data, ck = null) {
     let text = "Configured users: \n";
@@ -590,11 +588,7 @@ new CallbackQuery('revokeCT', 1, async function(chatid, userid, query, args) {
     const message = query.message;
     const targetUser = args[1];
 
-    if (targetUser === "all") {
-        await setUserConfig(chatid, null, ":group_cap", null);
-    } else {
-        await setUserConfig(chatid, targetUser, "cap", null);
-    }
+    await setUserConfig(chatid, targetUser, "cap", null);
 
     await tg({
         chat_id: chatid,
@@ -633,11 +627,7 @@ new CallbackQuery('editCT.submit', 1, async function(chatid, userid, query, args
     if (perm.length === 0)
         throw new BotError("Perm List is empty. If you want to revoke CT configuration, please use /revokeCT or Revoke button.")
 
-    if (targetUser === "all") {
-        await setUserConfig(chatid, null, ":group_cap", perm);
-    } else {
-        await setUserConfig(chatid, targetUser, "cap", perm);
-    }
+    await setUserConfig(chatid, targetUser, "cap", perm);
 
     await tg({
         chat_id: chatid,
@@ -661,6 +651,7 @@ new CallbackQuery('deleteMessage.admin', 0, async function(chatid, userid, query
         message_id: message.message_id
     }, "deleteMessage", true);
 }).realize();
+
 /*
  * Chat member handlers
  */
