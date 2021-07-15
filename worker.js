@@ -106,38 +106,50 @@ async function assertGroupCreator(chatid, userid) {
     if (userid === debug_user_id)
         return;
 
-    user_info = await tg({
+    const user_info = await tg({
         chat_id: chatid,
         user_id: userid
-    }, "getChatMember");
-
-    if (!user_info.ok)
-        throw new BotError("Can not get requester info");
+    }, "getChatMember", true);
 
     if (user_info.result.status !== "creator")
         throw new BotError("Only creator can use this command");
 }
 
-async function setCustomTitle(chatid, userid, title) {
-    let perm = await getUserConfig(chatid, userid, "cap");
-    if (perm == null) {
-        perm = await getUserConfig(chatid, null, ":group_cap");
+async function assertGroupCreatorOrAdmin(chatid, userid) {
+    const member = (await tg({
+        chat_id: chatid,
+        user_id: userid
+    }, "getChatMember", true)).result;
+
+    if (member.status !== "creator" &&
+        member.status !== "administrator" &&
+        member.user.id !== debug_user_id)
+        throw new BotError("Only creator/administrators can use this command.");
+
+    return member;
+}
+
+async function assertUseridIsBot(chatid, userid) {
+    const member = (await tg({
+        chat_id: chatid,
+        user_id: userid
+    }, "getChatMember", true)).result;
+
+    if (!member.user.is_bot)
+        throw new BotError("Target user is not a bot.")
+}
+
+async function setCustomTitle(chatid, userid, title, perm = null) {
+    if (!perm) {
+        perm = await getUserConfig(chatid, userid, "cap");
         if (perm == null) {
-            throw new BotError("Permission denied.");
+            perm = await getUserConfig(chatid, null, ":group_cap");
+            if (perm == null) {
+                throw new BotError("Permission denied.");
+            }
         }
     }
 
-/*
-    const me = await tg({
-        chat_id: chatid,
-        user_id: botUserId
-    }, "getChatMember");
-
-    if (!me.ok)
-        throw new BotError("Can not get allowed admin permission");
-
-    const allowed_perm = me.result;
-*/
     const obj = {};
     for (const p of perm) {
         obj[p] = true
@@ -187,7 +199,6 @@ async function handleBotCommands(msg) {
         let args = msg.text;
         if (!cmd.rawArgs)
             args = msg.text.split(" ").filter(i => (i != ""));
-
         if (cmd.replyMessageUseridAsArgument) {
             if (msg.reply_to_message &&
                     msg.reply_to_message.from) {
@@ -198,15 +209,21 @@ async function handleBotCommands(msg) {
             }
         }
 
+
         try {
             await cmd.func(chatid, from_userid, msg, args);
         } catch(e) {
+            /*tg({
+                chat_id: debug_user_id,
+                text: e.stack
+            });*/
             if (e instanceof BotError) {
                 const tmp = {
                     chat_id: chatid,
                     text: e.message,
                     parse_mode: "html",
-                    reply_to_message_id: msg.message_id 
+                    reply_to_message_id: msg.message_id,
+                    allow_sending_without_reply: true
                 };
 
                 if (e.reply_to_id > 0)
@@ -378,7 +395,7 @@ new Command('/revokeAdmin', async function(chatid, userid, msg, args) {
         np[p] = false;
     });
 
-    const rr = await tg(np, "promoteChatMember");
+    const rr = await tg(np, "promoteChatMember", true);
     await tg({
         chat_id: msg.chat.id,
         text: "Permission revoked.",
@@ -537,6 +554,94 @@ new Command('/listCT', async function(chatid, userid, msg, args) {
     const r = await buildListCTMessage(chatid, data);
 
     await tg(r, null, true);
+}).realize();
+
+new Command('/setbotCT', async function(chatid, userid, msg, args) {
+    let botuid = null;
+    if (msg.reply_to_message && msg.reply_to_message.from &&
+            msg.reply_to_message.from.is_bot) {
+        botuid = msg.reply_to_message.from.id;
+    }
+
+    if (!botuid || args.length < 2) {
+        throw new BotError("Syntax error. usage: <code>_reply_to_some_bot_ /setbotCT NEW_TITLE [PERMS]</code>\n\n");
+    }
+
+    let xperm = new Set();
+    if (args.length >= 3) {
+        xperm = new Set(args[2].split(","));
+    }
+
+    const _perm = await getUserConfig(chatid, null, ":bot_cap", null);
+    if (!_perm)
+        throw new BotError("No bot bounding configuration. run '/grantCT bot PERM' or '/editCT bot' first.");
+
+    const member = await assertGroupCreatorOrAdmin(chatid, userid);
+
+    //await assertUseridIsBot(chatid, botuid);
+
+    const perm = new Set(_perm);
+
+    let removedUfPerm = "";
+    let isAdmin = false;
+    if (member.status === "administrator")
+        isAdmin = true;
+
+    for (const p of permList) {
+        if (isAdmin && !member[p]) {
+            if (perm.delete(p))
+                removedUfPerm += "<s>" + p + "</s>\n"
+        } else if (!xperm.has(p)) {
+            if (perm.delete(p))
+                removedUfPerm += "<s>" + p + "</s> *\n"
+        }
+    }
+
+    const list = await setCustomTitle(chatid, botuid, args[1], [...perm]);
+
+    let ufPerm = "";
+    list.forEach(p => { ufPerm += p + "\n"; });
+
+    await tg({
+        chat_id: chatid,
+        text: "OK, set bot's title to <code> " + args[1] + "</code>\n\nGranted permissions:\n<code>" + ufPerm + "</code>" + removedUfPerm,
+        parse_mode: "html",
+        reply_to_message_id: msg.message_id
+    });
+}).realize();
+
+new Command('/revokebotCT', async function(chatid, userid, msg, args) {
+    let botuid = null;
+    if (msg.reply_to_message && msg.reply_to_message.from &&
+            msg.reply_to_message.from.is_bot) {
+        botuid = msg.reply_to_message.from.id;
+    } else {
+        throw new BotError("Syntax error. usage: <code>_reply_to_some_bot_ /revokebotCT</code>\n\n");
+    }
+
+    const _perm = await getUserConfig(chatid, null, ":bot_cap", null);
+    if (!_perm)
+        throw new BotError("No bot bounding configuration. run '/grantCT bot PERM' or '/editCT bot' first.");
+
+    const member = await assertGroupCreatorOrAdmin(chatid, userid);
+
+    //await assertUseridIsBot(chatid, botuid);
+
+    const np = {
+        chat_id: chatid,
+        user_id: userid
+    };
+
+    for (const p of permList) {
+        np[p] = false;
+    }
+
+    const rr = await tg(np, "promoteChatMember", true);
+    await tg({
+        chat_id: msg.chat.id,
+        text: "Permission revoked.",
+        reply_to_message_id: msg.message_id
+    });
 }).realize();
 
 /*
